@@ -1,18 +1,58 @@
-version: "3"
-
+version: '3.8'
 services:
+  mineru:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mineru:latest
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+    container_name: mineru
+    tty: true
+    stdin_open: true
+    command: /bin/bash -c "source /opt/mineru_venv/bin/activate && magic-pdf --help && exec bash"
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+    dns:
+    # ip route | awk '/default/ { print $3 }'
+    # sudo nano /etc/docker/daemon.json
+    # sudo systemctl restart docker
+      - 172.23.88.1
+      - 172.21.88.1 # Địa chỉ DNS của host hoặc gateway: ip route | awk '/default/ { print $3 }'
+      - 8.8.8.8
+      - 8.8.4.4
+      - 127.0.0.53
+      - 127.0.0.11    
+    # ports:
+    #   - "8971:8971"    
+    volumes:
+      - .:/app/mineru
+    working_dir: /app/mineru
   gotenberg:
     image: gotenberg/gotenberg:8
     ports:
       - "3500:3000"
-  mineru-api:
-    container_name: mineru-api
-    build: .
-    ports:
-      - "3000:3000"
-    environment:
-      - "GOTENBERG_URL=http://gotenberg:3000"
-    depends_on:
-      - gotenberg
-    volumes:
-      - .:/app
+  # mineru-api:
+  #   container_name: mineru-api
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   image: mineru:latest
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - "GOTENBERG_URL=http://gotenberg:3000"
+  #   depends_on:
+  #     - gotenberg
+  #   volumes:
+  #     - .:/app
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - capabilities: [gpu]

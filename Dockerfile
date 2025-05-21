@@ -1,40 +1,59 @@
-ARG PYTHON_ENV=python:3.10-slim
-ARG POETRY_VERSION=1.6.1
+# Sử dụng hình ảnh Ubuntu 22.04 làm base
+FROM nvidia/cuda:12.2.2-base-ubuntu22.04
 
-FROM $PYTHON_ENV as build
-# Allow statements and log messages to immediately appear in the logs
-ENV PYTHONUNBUFFERED True
+# Thiết lập biến môi trường để tránh tương tác trong quá trình cài đặt
+ENV DEBIAN_FRONTEND=noninteractive
 
+# Cập nhật danh sách gói và cài đặt các gói cần thiết
 RUN apt-get update && \
-    apt-get install --yes --no-install-recommends curl g++ libopencv-dev && \
-    rm -rf /var/lib/apt/lists/*
-RUN curl -sSL https://install.python-poetry.org | POETRY_VERSION=${POETRY_VERSION} python3 -
+    apt-get install -y \
+        software-properties-common && \
+    add-apt-repository ppa:deadsnakes/ppa && \
+    apt-get update && \
+    apt-get install -y \
+        python3.10 \
+        python3.10-venv \
+        python3.10-distutils \
+        python3-pip \
+        wget \
+        git \
+        libgl1 \
+        libreoffice \
+        fonts-noto-cjk \
+        fonts-wqy-zenhei \
+        fonts-wqy-microhei \
+        ttf-mscorefonts-installer \
+        fontconfig \
+        libglib2.0-0 \
+        libxrender1 \
+        libsm6 \
+        libxext6 \
+        poppler-utils \
+        && rm -rf /var/lib/apt/lists/*
 
-RUN mkdir -p /app
-WORKDIR /app
+# Đặt Python 3.10 làm mặc định
+RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
 
-COPY pyproject.toml poetry.lock ./
+# Tạo môi trường ảo cho MinerU
+RUN python3 -m venv /opt/mineru_venv
 
-ENV PATH="/root/.local/bin:$PATH"
-RUN poetry config virtualenvs.create false && \
-    poetry install --no-interaction --no-root
+# Sao chép repository local vào container
+COPY . /app/mineru
 
-FROM $PYTHON_ENV as prod
+# Cài đặt magic-pdf và cấu hình
+RUN /bin/bash -c "cp /app/mineru/magic-pdf.template.json /root/magic-pdf.json && \
+    source /opt/mineru_venv/bin/activate && \
+    pip3 install --upgrade pip && \
+    pip3 install -U /app/mineru[magic-pdf,full]"
 
-# Allow statements and log messages to immediately appear in the logs
-ENV PYTHONUNBUFFERED True
-# Copy local code to the container image.
-ENV APP_HOME /app
-WORKDIR $APP_HOME
-COPY . ./
-COPY magic-pdf.json /root
+# Cài đặt huggingface_hub và chạy script tải model
+RUN /bin/bash -c "source /opt/mineru_venv/bin/activate && \
+    pip3 install huggingface_hub && \
+    python3 /app/mineru/download_models_hf.py && \
+    sed -i 's|cpu|cuda|g' /root/magic-pdf.json"
 
-COPY --from=build /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
-COPY --from=build /usr/lib/x86_64-linux-gnu /usr/lib/x86_64-linux-gnu
-COPY --from=build /usr/local/bin/magic-pdf /usr/local/bin/magic-pdf
-COPY --from=build /usr/local/bin/uvicorn /usr/local/bin/uvicorn
+# Đặt thư mục làm việc
+WORKDIR /app/mineru
 
-RUN python download_models.py
-
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "3000"]
-
+# Đặt entrypoint để kích hoạt môi trường ảo và chạy lệnh
+ENTRYPOINT ["/bin/bash", "-c", "source /opt/mineru_venv/bin/activate && exec \"$@\"", "--"]
